@@ -1,0 +1,306 @@
+import math
+import pygame
+
+#  Constants
+
+c = 299792458          # Speed of light (m/s)
+m = 3000000       # Ship mass (kg)
+ly = 9.4607e15 # 1 light-year in meters
+
+# Rest energy of the ship
+E_rest = m * c**2   # Joules
+
+
+Total_energy = 40.0      # Total energy budget (in units of mc^2)
+Target_time = 1500.0   # Win condition: total proper time in years
+
+LEVELS = [
+    {"name": "Proxima Centauri", "distance_ly": 4.24},
+    {"name": "Vega",             "distance_ly": 25.0},
+    {"name": "PSR J0108–1431 (PULSAR!)",   "distance_ly": 424.0},
+    {"name": "Helix Nebula",     "distance_ly": 690.0},
+    {"name": "Gaia BH1 (BLACK HOLE! o:)",         "distance_ly": 1560.0},
+]
+
+#  Physics Functions
+
+def trip(E_t, D):
+    ''' E_t: total energy used
+    D: total trip distance '''
+    E_o = E_t / 2 # Energy used in the first phase of trip
+    y = 1 + E_o / (m * c**2) # Lorentz factor
+    v_max = c * math.sqrt(1 - 1/y**2) # max speed reached
+    d = D / 2 # Distance of the first phase
+    a = (c**2 * (y - 1)) / d # proper acceleration for the first phase
+    T = (c/a) * math.atanh(v_max/c) # proper time for the first phase
+    t = (c/a) * math.sinh((a * T) / c) # time for the first phase from Earth's reference frame
+    T_total = T * 2
+    t_total = t * 2
+    return {
+        "y": y,
+        "v_max": v_max,
+        "a": a,
+        "tau_half": T,
+        "tau_total": T_total,
+        "t_earth_half": t,
+        "t_earth_total": t_total,
+        "D": D,
+    }
+
+def seconds_to_years(s):
+    return s / (60.0 * 60.0 * 24.0 * 365.25)
+
+
+#  Pygame setup
+
+pygame.init()
+pygame.key.set_repeat(150, 40)
+
+# Window size
+WIDTH, HEIGHT = 900, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.setCaption = pygame.display.set_caption("Relativistic Rocket Game")
+
+# loading rocket png
+rocket_img = pygame.image.load("rocket.png").convert_alpha()
+rocket_img = pygame.transform.scale(rocket_img, (80, 80))
+
+# Fonts for drawing text
+FONT     = pygame.font.SysFont("consolas", 22)
+BIG_FONT = pygame.font.SysFont("consolas", 30)
+
+# Clock to control frame rate
+CLOCK = pygame.time.Clock()
+FPS   = 60
+
+
+# Current level
+current_level_index = 0
+
+remaining_energy_mc2 = Total_energy
+
+# Current energy choice
+chosen_energy_mc2 = 1.0
+
+# Global totals (accumulate over all levels)
+total_ship_time_s  = 0.0  # total proper time on ship (seconds)
+total_earth_time_s = 0.0  # total coordinate time in Earth frame (seconds)
+
+allocations = []   # list of chosen energies for each level (in mc^2)
+results     = []   # list of physics result dicts for each level
+
+
+game_state = "MENU"
+
+finished_all_levels = False
+
+
+#  Helper functions
+
+def draw_text(text, x, y, font=FONT, color=(255, 255, 255)):
+    """Draw a single line of text at (x, y)."""
+    surface = font.render(text, True, color)
+    screen.blit(surface, (x, y))
+
+
+def clamp(x, lo, hi):
+    '''Clamp x to the inclusive range [lo, hi].'''
+    return max(lo, min(hi, x))
+
+
+def animate_trip(level, phys):
+    '''rocket animation'''
+    dest_name = level["name"]
+    dist_ly   = level["distance_ly"]
+    v_frac_c  = phys["v_max"] / c
+    ship_years  = seconds_to_years(phys["tau_total"])
+    earth_years = seconds_to_years(phys["t_earth_total"])
+
+    x_start = 100
+    x_end   = WIDTH - 150
+    y_pos   = HEIGHT // 2
+
+    frames = 90
+
+    for i in range(frames):
+        # allow quit during animation
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                raise SystemExit
+
+        t = i / (frames - 1)
+        x = x_start + (x_end - x_start) * t
+
+        # Clear screen
+        screen.fill((0, 0, 0))
+
+        # Trip info text
+        draw_text(f"Flying to {dest_name}", 40, 40, BIG_FONT)
+        draw_text(f"Distance: {dist_ly:.1f} ly", 40, 80)
+        draw_text(f"Max speed: {v_frac_c:.3f} c", 40, 110)
+        draw_text(f"Ship time:  {ship_years:.1f} years", 40, 140)
+        draw_text(f"Earth time: {earth_years:.1f} years", 40, 170)
+
+        # Destination on the right side
+        pygame.draw.circle(screen, (220, 220, 120), (x_end + 40, y_pos + 20), 30)
+        draw_text("Destination", x_end - 10, y_pos + 60)
+
+        # Drawing the rocket image
+        screen.blit(
+            rocket_img,
+            (x - rocket_img.get_width() // 2,
+             y_pos - rocket_img.get_height() // 2)
+        )
+
+        pygame.display.flip()
+        CLOCK.tick(FPS)
+
+# Main Game Loop
+
+running = True
+while running:
+    # Limit loop to FPS frames per second
+    CLOCK.tick(FPS)
+
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        
+        if game_state == "MENU":
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_e:
+                    game_state = "LEVEL"
+
+        # If still playing
+        if game_state == "LEVEL":
+            if event.type == pygame.KEYDOWN:
+                # Adjust energy choice with left/right arrow keys
+                if event.key == pygame.K_LEFT:
+                    # Decrease chosen energy by 0.1 mc^2
+                    chosen_energy_mc2 -= 0.1
+                    # Ensure it's allowed amount of energy
+                    chosen_energy_mc2 = clamp(chosen_energy_mc2, 0.1, remaining_energy_mc2)
+
+                if event.key == pygame.K_RIGHT:
+                    # Increase chosen energy by 0.1 mc^2
+                    chosen_energy_mc2 += 0.1
+                    chosen_energy_mc2 = clamp(chosen_energy_mc2, 0.1, remaining_energy_mc2)
+
+                if event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    # Confirm energy choice for this level and perform trip
+                    if 0 < chosen_energy_mc2 <= remaining_energy_mc2:
+                        level = LEVELS[current_level_index]
+
+                        # Convert chosen energy from (mc^2 units) to Joules:
+                        E_t = chosen_energy_mc2 * E_rest
+
+                        # Convert distance from light-years to meters
+                        D = level["distance_ly"] * ly
+
+                        # Run the physics for this trip
+                        phys = trip(E_t, D)
+
+                        # animation
+                        animate_trip(level, phys)
+
+                        # Save results
+                        allocations.append(chosen_energy_mc2)
+                        results.append(phys)
+
+                        # Subtract used energy from remaining budget
+                        remaining_energy_mc2 -= chosen_energy_mc2
+
+                        # Update times
+                        total_ship_time_s  += phys["tau_total"]
+                        total_earth_time_s += phys["t_earth_total"]
+
+                        current_level_index += 1
+
+                        if current_level_index >= len(LEVELS):
+                            finished_all_levels = True
+                            game_state = "SUMMARY"
+                        elif remaining_energy_mc2 < 0.1:
+                            game_state = "SUMMARY"
+                        
+                        else:
+                            chosen_energy_mc2 = 0.1
+
+    # Draw frame
+    screen.fill((0, 0, 0))  # Black background
+
+    if game_state == "MENU":
+        screen.fill((0, 0, 0))
+
+        draw_text("RELATIVISTIC ROCKET GAME", 200, 120, BIG_FONT)
+        draw_text("Use your available energy to fly to 5 destinations.", 200, 200)
+        draw_text("You must reach the black hole GAIA BH1 within 1500 years.", 200, 230)
+        draw_text("If you do not, YOU DIE.", 200, 260)
+
+
+        draw_text("Controls:", 200, 320)
+        draw_text("LEFT/RIGHT arrows = adjust energy per trip", 200, 350)
+        draw_text("SPACE or ENTER     = confirm trip", 200, 380)
+
+        draw_text("Press e to begin!!!!", 200, 480, BIG_FONT)
+
+        pygame.display.flip()
+        continue
+
+
+    if game_state == "LEVEL":
+        # "choose energy for current level" screen
+        level = LEVELS[current_level_index]
+        y = 40
+
+        draw_text("Relativistic Rocket Game", 40, y, BIG_FONT); y += 40
+        draw_text(f"Level {current_level_index+1} / {len(LEVELS)}", 40, y); y += 30
+        draw_text(f"Destination: {level['name']}", 40, y); y += 30
+        draw_text(f"Distance: {level['distance_ly']} light-years", 40, y); y += 30
+
+        draw_text(f"Total energy budget: {Total_energy:.1f} (m c^2)", 40, y); y += 25
+        draw_text(f"Remaining energy:   {remaining_energy_mc2:.3f} (m c^2)", 40, y); y += 25
+
+        draw_text(f"Chosen energy for this trip: {chosen_energy_mc2:.3f} (m c^2)", 40, y); y += 30
+        draw_text("Use LEFT/RIGHT arrows to change energy by 0.1 mc^2", 40, y); y += 25
+        draw_text("Press ENTER or SPACE to confirm this choice.", 40, y); y += 40
+
+        # Show current times
+        if total_ship_time_s > 0:
+            draw_text(f"Ship time so far:  {seconds_to_years(total_ship_time_s):.1f} years", 40, y); y += 25
+            draw_text(f"Earth time so far: {seconds_to_years(total_earth_time_s):.1f} years", 40, y); y += 25
+
+        draw_text(f"Target total ship-frame time: {Target_time:.0f} years",
+                  40, HEIGHT - 50)
+
+    elif game_state == "SUMMARY":
+        # Final summary screen
+        y = 40
+        draw_text("Mission Summary", 40, y, BIG_FONT); y += 40
+
+        total_ship_years  = seconds_to_years(total_ship_time_s)
+        total_earth_years = seconds_to_years(total_earth_time_s)
+
+        draw_text(f"Total ship-frame time:  {total_ship_years:.1f} years", 40, y); y += 30
+        draw_text(f"Total Earth-frame time: {total_earth_years:.1f} years", 40, y); y += 30
+        draw_text(f"Energy leftover:         {remaining_energy_mc2:.3f} (m c^2)", 40, y); y += 40
+
+        draw_text(f"Target ship time:        {Target_time:.1f} years", 40, y); y += 30
+
+        # Decide win/lose outcome
+        if finished_all_levels and total_ship_years <= Target_time:
+            draw_text("WOW! You won you're smart :)",
+                      40, y, BIG_FONT, (100, 255, 100)); y += 40
+        elif finished_all_levels:
+            draw_text("You got to the black hole", 40, y); y += 25
+            draw_text("but you were too slow :(.", 40, y); y += 30
+            draw_text("Do better next time.", 40, y,
+                      BIG_FONT, (255, 200, 100)); y += 40
+        else:
+            draw_text("You ran out of energy before", 40, y); y += 25
+            draw_text("getting to the black hole :(.", 40, y); y += 30
+
+    pygame.display.flip()
+
+pygame.quit()

@@ -1,0 +1,39 @@
+import math
+
+c = 299792458 # speed of light (m/s)
+m = 3000000 # mass (kg)
+ly = 9.4607e15 # in meters
+
+def trip(E_t, D):
+    ''' E_t: total energy used
+    D: total trip distance '''
+    E_o = E_t / 2 # Energy used in the first phase of trip
+    y = 1 + E_o / (m * c**2) # Lorentz factor
+    v_max = c * math.sqrt(1 - 1/y**2) # max speed reached
+    d = D / 2 # Distance of the first phase
+    a = (c**2 * (y - 1)) / d # proper acceleration for the first phase
+    T = (c/a) * math.atanh(v_max/c) # proper time for the first phase
+    t = (c/a) * math.sinh((a * T) / c) # time for the first phase from Earth's reference frame
+    T_total = T * 2
+    t_total = t * 2
+    return {
+        "y": y,
+        "v_max": v_max,
+        "a": a,
+        "tau_half": T,
+        "tau_total": T_total,
+        "t_earth_half": t,
+        "t_earth_total": t_total,
+        "D": D,
+    }
+
+def seconds_to_years(s):
+    return s / (60 * 60 * 24 * 365.25)
+
+levels = [
+    {"name": "Proxima Centauri", "distance_ly": 4.24},
+    {"name": "Vega", "distance_ly": 25.0},
+    {"name": "PSR J0108–1431", "distance_ly": 424.0},
+    {"name": "Helix Nebula", "distance_ly": 650.0},
+    {"name": "Gaia BH1", "distance_ly": 1560.0},
+]
